@@ -5,16 +5,39 @@ Reads payments.jsonl and works out how much money we actually collected.
 Run:  python3 reconcile.py
 """
 import json
+from datetime import datetime
+from decimal import Decimal
 
-total = 0.0
-count = 0
+def parse_amount(value):
+    if isinstance(value, str):
+        value = value.replace(",", "").strip()
+    return Decimal(str(value))
 
-with open("payments.jsonl") as f:
+
+def parse_ts(value):
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+latest = {}
+
+with open("payments.jsonl", encoding="utf-8") as f:
     for line in f:
-        event = json.loads(line)
-        if event["status"] == "success":
-            total += float(event["amount"])
-            count += 1
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue  # unreadable line
+        if not isinstance(event, dict) or not event.get("txn_id"):
+            continue  # no txn_id
+        ts = parse_ts(event["ts"])
+        current = latest.get(event["txn_id"])
+        if current is None or ts > current[0]:
+            latest[event["txn_id"]] = (ts, event)
+
+total = Decimal("0")
+count = 0
+for _, event in latest.values():
+    if event["status"] == "success":
+        total += parse_amount(event["amount"])
+        count += 1
 
 with open("expected.txt") as f:
     expected = int(f.read().strip())
